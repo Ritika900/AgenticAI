@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Bug Triage — Agent Architecture</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg0:#0f0f14;--bg1:#16161f;--bg2:#1e1e2a;
+  --b:#252535;--b2:#353550;
+  --tx:#e8e8f0;--ts:#9090aa;--tt:#55556a;
+  --font-sans:'Segoe UI',system-ui,sans-serif;
+  --font-mono:'DM Mono','Fira Mono',monospace;
+
+  --purple-fill:#26215C;--purple-stroke:#AFA9EC;--purple-text:#CECBF6;
+  --teal-fill:#04342C;--teal-stroke:#5DCAA5;--teal-text:#9FE1CB;
+  --coral-fill:#4A1B0C;--coral-stroke:#F0997B;--coral-text:#F5C4B3;
+  --amber-fill:#412402;--amber-stroke:#EF9F27;--amber-text:#FAC775;
+  --gray-fill:#2C2C2A;--gray-stroke:#B4B2A9;--gray-text:#D3D1C7;
+  --blue-fill:#042C53;--blue-stroke:#85B7EB;--blue-text:#B5D4F4;
+  --green-fill:#173404;--green-stroke:#97C459;--green-text:#C0DD97;
+  --red-fill:#501313;--red-stroke:#F09595;--red-text:#F7C1C1;
+}
+body{background:var(--bg0);color:var(--tx);font-family:var(--font-sans);min-height:100vh}
+
+.wrap{max-width:900px;margin:0 auto;padding:0 0 32px}
+.top-bar{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:0.5px solid var(--b);margin-bottom:16px;background:var(--bg1)}
+.top-bar h2{font-size:15px;font-weight:600;color:var(--tx)}
+.badge{font-size:11px;padding:3px 10px;border-radius:20px;border:0.5px solid;font-family:var(--font-mono)}
+.badge.live{background:#0d2b1a;color:#3ddc84;border-color:#1a4d30}
+
+.tabs{display:flex;gap:4px;padding:0 20px 14px}
+.tab{font-size:13px;padding:5px 14px;border-radius:6px;border:0.5px solid var(--b);color:var(--ts);cursor:pointer;background:transparent;transition:all .15s}
+.tab.active,.tab:hover{background:var(--bg2);color:var(--tx);border-color:var(--b2)}
+
+.pane{display:none;padding:0 20px}
+.pane.active{display:block}
+
+/* ── ARCH SVG ── */
+#arch-svg{width:100%;overflow:visible}
+.arch-node{transition:opacity .2s}
+
+/* ── NODE INFO ── */
+#node-info{display:none;margin:10px 0 0;padding:12px 16px;background:var(--bg1);border:0.5px solid var(--b);border-radius:8px;font-size:13px}
+
+/* ── TOOL GRID ── */
+.tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tool-card{background:var(--bg1);border:0.5px solid var(--b);border-radius:8px;padding:14px 16px}
+.tool-card h3{font-size:13px;font-weight:600;color:var(--tx);margin-bottom:5px}
+.tool-card p{font-size:12px;color:var(--ts);line-height:1.55;margin-bottom:8px}
+.tool-tag{display:inline-block;font-size:10px;padding:2px 7px;border-radius:4px;border:0.5px solid;margin:2px 2px 2px 0;font-family:var(--font-mono)}
+.tag-purple{background:var(--purple-fill);border-color:var(--purple-stroke);color:var(--purple-text)}
+.tag-teal{background:var(--teal-fill);border-color:var(--teal-stroke);color:var(--teal-text)}
+.tag-coral{background:var(--coral-fill);border-color:var(--coral-stroke);color:var(--coral-text)}
+.tag-amber{background:var(--amber-fill);border-color:var(--amber-stroke);color:var(--amber-text)}
+.tag-blue{background:var(--blue-fill);border-color:var(--blue-stroke);color:var(--blue-text)}
+.tag-green{background:var(--green-fill);border-color:var(--green-stroke);color:var(--green-text)}
+.tag-gray{background:var(--gray-fill);border-color:var(--gray-stroke);color:var(--gray-text)}
+.tag-red{background:var(--red-fill);border-color:var(--red-stroke);color:var(--red-text)}
+
+/* ── LIVE FLOW ── */
+.flow-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.flow-log{background:var(--bg1);border:0.5px solid var(--b);border-radius:8px;padding:10px 12px;height:230px;overflow-y:auto;font-family:var(--font-mono);font-size:11px}
+.flow-log::-webkit-scrollbar{width:3px}
+.flow-log::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
+.log-entry{padding:4px 0;border-bottom:0.5px solid var(--b);display:flex;gap:8px;align-items:flex-start;line-height:1.4}
+.log-entry:last-child{border-bottom:none}
+.log-time{color:var(--tt);flex-shrink:0;font-size:10px;padding-top:1px}
+.log-icon{flex-shrink:0}
+.log-msg{color:var(--ts)}
+.log-msg b{color:var(--tx);font-weight:500}
+
+.state-panel{background:var(--bg1);border:0.5px solid var(--b);border-radius:8px;padding:10px 12px;height:230px;overflow-y:auto}
+.state-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:0.5px solid var(--b);font-size:12px}
+.state-row:last-child{border-bottom:none}
+.state-key{color:var(--ts);font-family:var(--font-mono)}
+.state-val{color:var(--tx);font-family:var(--font-mono);font-size:11px;text-align:right;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v-int{color:#85B7EB}.v-bool-t{color:#97C459}.v-bool-f{color:var(--tt)}.v-null{color:var(--tt)}.v-str{color:#FAC775}
+
+.sim-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.sim-bar label{font-size:12px;color:var(--ts)}
+.sim-input{flex:1;min-width:160px;font-size:12px;padding:6px 10px;border-radius:6px;border:0.5px solid var(--b2);background:var(--bg2);color:var(--tx);font-family:var(--font-sans)}
+.sim-btn{font-size:12px;padding:6px 14px;border-radius:6px;border:0.5px solid var(--b2);background:var(--bg2);color:var(--tx);cursor:pointer;white-space:nowrap;transition:background .15s}
+.sim-btn:hover{background:var(--bg1)}
+.sim-btn.primary{background:var(--purple-fill);border-color:var(--purple-stroke);color:var(--purple-text)}
+.sim-btn.primary:hover{opacity:.85}
+
+.step-track{display:flex;align-items:center;gap:0;margin-bottom:14px;overflow-x:auto;padding-bottom:2px}
+.step-dot{min-width:28px;height:28px;border-radius:50%;border:0.5px solid var(--b2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;background:var(--bg1);color:var(--ts);flex-shrink:0;transition:all .3s;position:relative;z-index:1;cursor:default}
+.step-dot.done{background:var(--teal-fill);border-color:var(--teal-stroke);color:var(--teal-text)}
+.step-dot.active{background:var(--purple-fill);border-color:var(--purple-stroke);color:var(--purple-text);box-shadow:0 0 0 3px rgba(175,169,236,.2)}
+.step-dot.error{background:var(--red-fill);border-color:var(--red-stroke);color:var(--red-text)}
+.step-line{flex:1;height:0.5px;background:var(--b);min-width:10px;transition:background .3s}
+.step-line.done{background:var(--teal-stroke)}
+
+.active-bar{height:38px;border-radius:8px;border:0.5px solid var(--b);background:var(--bg1);display:flex;align-items:center;padding:0 14px;gap:10px}
+
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+.pulse{animation:pulse-dot 1.2s infinite}
+@keyframes dash-flow{to{stroke-dashoffset:-20}}
+.flow-path{stroke-dasharray:6 4;animation:dash-flow .6s linear infinite}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="top-bar">
+  <h2>Bug Triage — Agent Architecture</h2>
+  <span class="badge live" id="sys-status">● system online</span>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('arch')">Architecture</button>
+  <button class="tab" onclick="switchTab('flow')">Live flow</button>
+  <button class="tab" onclick="switchTab('tools')">Tools &amp; integrations</button>
+</div>
+
+<!-- ══════════════════════ ARCHITECTURE TAB ══════════════════════ -->
+<div class="pane active" id="pane-arch">
+<svg id="arch-svg" viewBox="0 0 860 720" role="img">
+<title>Bug Triage Multi-Agent Architecture</title>
+<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<!-- ── LAYER LABELS ── -->
+<text x="10" y="52" font-size="9" font-family="var(--font-mono)" fill="var(--tt)">ENTRY</text>
+<text x="10" y="170" font-size="9" font-family="var(--font-mono)" fill="var(--tt)">WORKFLOW</text>
+<text x="10" y="300" font-size="9" font-family="var(--font-mono)" fill="var(--tt)">AGENTS</text>
+<text x="10" y="450" font-size="9" font-family="var(--font-mono)" fill="var(--tt)">TOOLS</text>
+<text x="10" y="590" font-size="9" font-family="var(--font-mono)" fill="var(--tt)">OUTPUT</text>
+
+<!-- ── LAYER DIVIDERS ── -->
+<line x1="70" y1="68" x2="850" y2="68" stroke="var(--b)" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="70" y1="210" x2="850" y2="210" stroke="var(--b)" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="70" y1="395" x2="850" y2="395" stroke="var(--b)" stroke-width="0.5" stroke-dasharray="3 3"/>
+<line x1="70" y1="545" x2="850" y2="545" stroke="var(--b)" stroke-width="0.5" stroke-dasharray="3 3"/>
+
+<!-- ════════════════════════ NODES ════════════════════════ -->
+
+<!-- USER -->
+<g id="n-user" class="arch-node" style="cursor:pointer" onclick="nodeClick('user')">
+  <rect x="300" y="18" width="130" height="42" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+  <text x="365" y="34" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="600" font-family="var(--font-sans)" fill="var(--gray-text)">User / Web UI</text>
+  <text x="365" y="51" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--gray-stroke)">Bug description</text>
+</g>
+
+<!-- APP.PY -->
+<g id="n-app" class="arch-node" style="cursor:pointer" onclick="nodeClick('app')">
+  <rect x="100" y="18" width="150" height="42" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+  <text x="175" y="34" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="600" font-family="var(--font-sans)" fill="var(--gray-text)">app.py</text>
+  <text x="175" y="51" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--gray-stroke)">Flask API + dedup cache</text>
+</g>
+
+<!-- MAIN.PY -->
+<g id="n-main" class="arch-node" style="cursor:pointer" onclick="nodeClick('main')">
+  <rect x="240" y="108" width="250" height="52" rx="8" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.8"/>
+  <text x="365" y="128" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="600" font-family="var(--font-sans)" fill="var(--purple-text)">main.py + workflow.py</text>
+  <text x="365" y="148" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--purple-stroke)">LangGraph state machine</text>
+</g>
+
+<!-- DETECTIVE AGENT -->
+<g id="n-detective" class="arch-node" style="cursor:pointer" onclick="nodeClick('detective')">
+  <rect x="80" y="240" width="165" height="52" rx="8" fill="var(--blue-fill)" stroke="var(--blue-stroke)" stroke-width="0.8"/>
+  <text x="162" y="260" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="600" font-family="var(--font-sans)" fill="var(--blue-text)">Detective agent</text>
+  <text x="162" y="280" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--blue-stroke)">detective.py · GitHub search</text>
+</g>
+
+<!-- BRAIN AGENT -->
+<g id="n-brain" class="arch-node" style="cursor:pointer" onclick="nodeClick('brain')">
+  <rect x="290" y="240" width="165" height="52" rx="8" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.8"/>
+  <text x="372" y="260" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="600" font-family="var(--font-sans)" fill="var(--amber-text)">Brain agent</text>
+  <text x="372" y="280" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--amber-stroke)">brain.py · Priority + pattern</text>
+</g>
+
+<!-- RAG CHECK NODE -->
+<g id="n-rag" class="arch-node" style="cursor:pointer" onclick="nodeClick('rag')">
+  <rect x="500" y="240" width="165" height="52" rx="8" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+  <text x="582" y="260" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="600" font-family="var(--font-sans)" fill="var(--teal-text)">RAG check</text>
+  <text x="582" y="280" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--teal-stroke)">rag_store.py · Duplicate?</text>
+</g>
+
+<!-- FIXER AGENT -->
+<g id="n-fixer" class="arch-node" style="cursor:pointer" onclick="nodeClick('fixer')">
+  <rect x="690" y="240" width="150" height="52" rx="8" fill="var(--coral-fill)" stroke="var(--coral-stroke)" stroke-width="0.8"/>
+  <text x="765" y="260" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="600" font-family="var(--font-sans)" fill="var(--coral-text)">Fixer agent</text>
+  <text x="765" y="280" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--coral-stroke)">fixer.py · Create / update</text>
+</g>
+
+<!-- ── TOOLS LAYER ── -->
+<!-- GitHub API -->
+<g id="n-ghapi" class="arch-node" style="cursor:pointer" onclick="nodeClick('ghapi')">
+  <rect x="80" y="420" width="150" height="44" rx="8" fill="var(--blue-fill)" stroke="var(--blue-stroke)" stroke-width="0.8"/>
+  <text x="155" y="438" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="600" font-family="var(--font-sans)" fill="var(--blue-text)">github_tool.py</text>
+  <text x="155" y="455" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--blue-stroke)">REST · search_github_issues</text>
+</g>
+
+<!-- Azure OpenAI -->
+<g id="n-azure" class="arch-node" style="cursor:pointer" onclick="nodeClick('azure')">
+  <rect x="260" y="420" width="150" height="44" rx="8" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.8"/>
+  <text x="335" y="438" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="600" font-family="var(--font-sans)" fill="var(--amber-text)">Azure OpenAI</text>
+  <text x="335" y="455" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--amber-stroke)">GPT + embeddings</text>
+</g>
+
+<!-- ChromaDB -->
+<g id="n-chroma" class="arch-node" style="cursor:pointer" onclick="nodeClick('chroma')">
+  <rect x="440" y="420" width="150" height="44" rx="8" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+  <text x="515" y="438" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="600" font-family="var(--font-sans)" fill="var(--teal-text)">ChromaDB</text>
+  <text x="515" y="455" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--teal-stroke)">Persistent vector store</text>
+</g>
+
+<!-- ServiceNow -->
+<g id="n-snow" class="arch-node" style="cursor:pointer" onclick="nodeClick('snow')">
+  <rect x="620" y="420" width="150" height="44" rx="8" fill="var(--coral-fill)" stroke="var(--coral-stroke)" stroke-width="0.8"/>
+  <text x="695" y="438" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="600" font-family="var(--font-sans)" fill="var(--coral-text)">servicenow_tool.py</text>
+  <text x="695" y="455" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--coral-stroke)">create / update incident</text>
+</g>
+
+<!-- ── OUTPUT LAYER ── -->
+<!-- Google Sheets -->
+<g id="n-sheets" class="arch-node" style="cursor:pointer" onclick="nodeClick('sheets')">
+  <rect x="80" y="565" width="150" height="44" rx="8" fill="var(--green-fill)" stroke="var(--green-stroke)" stroke-width="0.8"/>
+  <text x="155" y="583" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="600" font-family="var(--font-sans)" fill="var(--green-text)">sheets_tool.py</text>
+  <text x="155" y="600" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--green-stroke)">Google Sheets log</text>
+</g>
+
+<!-- Excel Logger -->
+<g id="n-excel" class="arch-node" style="cursor:pointer" onclick="nodeClick('excel')">
+  <rect x="260" y="565" width="150" height="44" rx="8" fill="var(--green-fill)" stroke="var(--green-stroke)" stroke-width="0.8"/>
+  <text x="335" y="583" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="600" font-family="var(--font-sans)" fill="var(--green-text)">excel_logger.py</text>
+  <text x="335" y="600" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--green-stroke)">Past Incidents Log.xlsx</text>
+</g>
+
+<!-- RAG Store write-back -->
+<g id="n-ragstore" class="arch-node" style="cursor:pointer" onclick="nodeClick('ragstore')">
+  <rect x="440" y="565" width="150" height="44" rx="8" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.8"/>
+  <text x="515" y="583" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="600" font-family="var(--font-sans)" fill="var(--teal-text)">RAG write-back</text>
+  <text x="515" y="600" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--teal-stroke)">add_issue() → ChromaDB</text>
+</g>
+
+<!-- Format Response -->
+<g id="n-response" class="arch-node" style="cursor:pointer" onclick="nodeClick('response')">
+  <rect x="620" y="565" width="150" height="44" rx="8" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.8"/>
+  <text x="695" y="583" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="600" font-family="var(--font-sans)" fill="var(--gray-text)">format_response()</text>
+  <text x="695" y="600" text-anchor="middle" dominant-baseline="central" font-size="10" font-family="var(--font-sans)" fill="var(--gray-stroke)">JSON → UI ticket card</text>
+</g>
+
+<!-- ════════════════════════ EDGES ════════════════════════ -->
+<!-- user → app -->
+<line x1="300" y1="39" x2="252" y2="39" stroke="var(--gray-stroke)" stroke-width="1" marker-end="url(#arr)" fill="none"/>
+<!-- app → main -->
+<path d="M175 60 L175 134 L240 134" stroke="var(--gray-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+<!-- user → main -->
+<line x1="365" y1="60" x2="365" y2="108" stroke="var(--purple-stroke)" stroke-width="1" marker-end="url(#arr)" fill="none"/>
+
+<!-- main → detective (step 1 in workflow) -->
+<path d="M300 160 L162 160 L162 240" stroke="var(--blue-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+
+<!-- detective → brain (after GitHub search) -->
+<line x1="245" y1="266" x2="290" y2="266" stroke="var(--blue-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+
+<!-- brain → detective (refined_search_needed loop, dashed) -->
+<path d="M300 250 L270 250 L270 222 L162 222 L162 240" stroke="var(--amber-stroke)" stroke-width="0.8" stroke-dasharray="4 3" marker-end="url(#arr)" fill="none" opacity="0.6"/>
+
+<!-- brain → rag check -->
+<line x1="455" y1="266" x2="500" y2="266" stroke="var(--amber-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+
+<!-- rag → fixer (no duplicate) -->
+<line x1="665" y1="266" x2="690" y2="266" stroke="var(--teal-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+
+<!-- rag → format_response (duplicate found, dashed) -->
+<path d="M582 292 L582 640 L620 640" stroke="var(--teal-stroke)" stroke-width="0.8" stroke-dasharray="4 3" marker-end="url(#arr)" fill="none" opacity="0.5"/>
+
+<!-- detective → clarify → format_response (needs_user_clarification, dashed) -->
+<path d="M162 292 L162 340 L695 340 L695 565" stroke="var(--blue-stroke)" stroke-width="0.8" stroke-dasharray="4 3" marker-end="url(#arr)" fill="none" opacity="0.5"/>
+
+<!-- detective → ghapi -->
+<line x1="155" y1="292" x2="155" y2="420" stroke="var(--blue-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+
+<!-- brain → azure (LLM classify) -->
+<line x1="335" y1="292" x2="335" y2="420" stroke="var(--amber-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+
+<!-- brain → sheets (pattern check) -->
+<path d="M372 292 L372 360 L155 360 L155 565" stroke="var(--amber-stroke)" stroke-width="0.8" stroke-dasharray="3 3" marker-end="url(#arr)" fill="none" opacity="0.45"/>
+
+<!-- rag → chroma (similarity query) -->
+<line x1="515" y1="292" x2="515" y2="420" stroke="var(--teal-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+
+<!-- fixer → snow -->
+<line x1="695" y1="292" x2="695" y2="420" stroke="var(--coral-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+
+<!-- fixer → sheets (log_incident) -->
+<path d="M690 292 L660 292 L660 370 L155 370 L155 565" stroke="var(--green-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none" opacity="0.4"/>
+
+<!-- fixer → excel (log_to_excel) -->
+<path d="M765 292 L765 380 L335 380 L335 565" stroke="var(--green-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none" opacity="0.4"/>
+
+<!-- fixer → rag store write-back (add_issue) -->
+<path d="M750 292 L750 390 L515 390 L515 565" stroke="var(--teal-stroke)" stroke-width="0.8" stroke-dasharray="4 3" marker-end="url(#arr)" fill="none" opacity="0.5"/>
+
+<!-- fixer → format_response -->
+<line x1="765" y1="292" x2="765" y2="565" stroke="var(--coral-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none" opacity="0.5"/>
+
+<!-- format_response → UI output (arrow down) -->
+<line x1="695" y1="609" x2="695" y2="650" stroke="var(--gray-stroke)" stroke-width="0.8" marker-end="url(#arr)" fill="none"/>
+<text x="695" y="668" text-anchor="middle" font-size="10" font-family="var(--font-mono)" fill="var(--tt)">→ UI ticket card</text>
+
+<!-- sheets + excel → brain (RAG feedback next session, dashed) -->
+<path d="M80 587 L55 587 L55 134 L240 134" stroke="var(--purple-stroke)" stroke-width="0.8" stroke-dasharray="4 3" marker-end="url(#arr)" fill="none" opacity="0.35"/>
+
+<!-- ── LEGEND ── -->
+<rect x="80" y="693" width="720" height="22" rx="5" fill="var(--bg1)" stroke="var(--b)" stroke-width="0.5"/>
+<circle cx="105" cy="704" r="4" fill="var(--blue-fill)" stroke="var(--blue-stroke)" stroke-width="0.5"/>
+<text x="113" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--ts)">Detective</text>
+<circle cx="170" cy="704" r="4" fill="var(--amber-fill)" stroke="var(--amber-stroke)" stroke-width="0.5"/>
+<text x="178" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--ts)">Brain</text>
+<circle cx="218" cy="704" r="4" fill="var(--teal-fill)" stroke="var(--teal-stroke)" stroke-width="0.5"/>
+<text x="226" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--ts)">RAG</text>
+<circle cx="262" cy="704" r="4" fill="var(--coral-fill)" stroke="var(--coral-stroke)" stroke-width="0.5"/>
+<text x="270" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--ts)">Fixer/ServiceNow</text>
+<circle cx="366" cy="704" r="4" fill="var(--green-fill)" stroke="var(--green-stroke)" stroke-width="0.5"/>
+<text x="374" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--ts)">Logging</text>
+<circle cx="420" cy="704" r="4" fill="var(--purple-fill)" stroke="var(--purple-stroke)" stroke-width="0.5"/>
+<text x="428" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--ts)">Orchestration</text>
+<circle cx="498" cy="704" r="4" fill="var(--gray-fill)" stroke="var(--gray-stroke)" stroke-width="0.5"/>
+<text x="506" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--ts)">Entry/Output</text>
+<line x1="570" y1="704" x2="584" y2="704" stroke="var(--ts)" stroke-width="0.8" stroke-dasharray="3 2"/>
+<text x="588" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--ts)">conditional path</text>
+<text x="750" y="704" dominant-baseline="central" font-size="9" font-family="var(--font-sans)" fill="var(--tt)">click any node</text>
+
+<!-- ACTIVE FLOW OVERLAY -->
+<g id="flow-overlay"></g>
+</svg>
+
+<!-- Node info panel -->
+<div id="node-info">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span id="ni-title" style="font-weight:600;color:var(--tx);font-size:14px"></span>
+    <span id="ni-tag" class="tool-tag"></span>
+  </div>
+  <p id="ni-desc" style="color:var(--ts);line-height:1.55;font-size:12px;margin-bottom:6px"></p>
+  <div id="ni-calls" style="font-size:11px;color:var(--tt);font-family:var(--font-mono)"></div>
+</div>
+</div>
+
+<!-- ══════════════════════ LIVE FLOW TAB ══════════════════════ -->
+<div class="pane" id="pane-flow">
+
+<div class="sim-bar">
+  <label>Bug report:</label>
+  <input class="sim-input" id="sim-input" value="Login page crashes after resetting my password" placeholder="Describe the bug..."/>
+  <button class="sim-btn primary" onclick="runSim()">▶ Run simulation</button>
+  <button class="sim-btn" onclick="clearSim()">Clear</button>
+</div>
+
+<div class="step-track" id="step-track"></div>
+
+<div class="flow-grid">
+  <div>
+    <div style="font-size:11px;font-weight:600;color:var(--ts);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">Event log</div>
+    <div class="flow-log" id="flow-log">
+      <div style="color:var(--tt);font-size:11px;padding:6px 0">Waiting for simulation…</div>
+    </div>
+  </div>
+  <div>
+    <div style="font-size:11px;font-weight:600;color:var(--ts);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">BugTriageState snapshot</div>
+    <div class="state-panel" id="state-panel">
+      <div style="color:var(--tt);font-size:11px;padding:6px 0">No state yet</div>
+    </div>
+  </div>
+</div>
+
+<div style="font-size:11px;font-weight:600;color:var(--ts);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">Active node</div>
+<div class="active-bar">
+  <span id="aa-dot" style="width:9px;height:9px;border-radius:50%;background:var(--b2);flex-shrink:0;transition:background .3s"></span>
+  <span id="aa-name" style="font-size:13px;color:var(--ts)">Idle</span>
+  <span id="aa-detail" style="font-size:11px;color:var(--tt);margin-left:auto;font-family:var(--font-mono)"></span>
+</div>
+
+<div style="margin-top:14px;font-size:11px;color:var(--tt);font-family:var(--font-mono);line-height:1.7">
+  Simulates the actual LangGraph workflow: <b style="color:var(--ts)">Detective → Brain → RAG check → Fixer → format_response</b><br/>
+  Conditional edges: refined-search loop (Brain→Detective), duplicate short-circuit (RAG→format), clarification (Detective→format)
+</div>
+</div>
+
+<!-- ══════════════════════ TOOLS TAB ══════════════════════ -->
+<div class="pane" id="pane-tools">
+<div class="tool-grid">
+
+  <div class="tool-card">
+    <h3>detective.py</h3>
+    <p>First agent in the workflow. Uses LLM to extract search keywords from the bug report, then calls GitHub issues search. Sets <code>github_matches</code>, <code>needs_user_clarification</code>, and <code>selected_issue</code> in state.</p>
+    <span class="tool-tag tag-blue">run_detective()</span>
+    <span class="tool-tag tag-blue">extract_keywords()</span>
+    <span class="tool-tag tag-blue">search_github_issues()</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Deps: langchain-openai, requests · Env: GITHUB_TOKEN, GITHUB_REPO</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>brain.py</h3>
+    <p>Second agent. Calls <code>search_past_incidents()</code> on Google Sheets to detect patterns, then asks LLM (Azure OpenAI) to classify priority P1–P4. Auto-escalates to P1 if ≥2 unresolved similar reports in past 7 days. Sets <code>refined_search_needed</code> to loop Detective if needed.</p>
+    <span class="tool-tag tag-amber">run_brain()</span>
+    <span class="tool-tag tag-amber">pattern detection</span>
+    <span class="tool-tag tag-amber">P1–P4 LLM classify</span>
+    <span class="tool-tag tag-amber">refined_search loop</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Deps: langchain-openai · Env: OPENAI_DEPLOYMENT, OPENAI_API_BASE</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>fixer.py</h3>
+    <p>Final action agent. First checks ServiceNow for existing tickets; if found, updates them. Otherwise creates a new incident. After creation: logs to Google Sheets, adds issue to ChromaDB RAG store, and appends to Excel log. All three writes are individually try/caught.</p>
+    <span class="tool-tag tag-coral">run_fixer()</span>
+    <span class="tool-tag tag-coral">search_incidents()</span>
+    <span class="tool-tag tag-coral">create_incident()</span>
+    <span class="tool-tag tag-coral">update_incident()</span>
+    <span class="tool-tag tag-green">log_incident()</span>
+    <span class="tool-tag tag-teal">add_issue()</span>
+    <span class="tool-tag tag-green">log_to_excel()</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Calls: servicenow_tool, sheets_tool, rag_store, excel_logger</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>rag_store.py</h3>
+    <p>RAG layer. Embeds bug descriptions via Azure OpenAI <code>text-embedding-ada-002</code> and stores/queries a persistent ChromaDB collection (<code>bug_issues</code>) using cosine similarity. Used for duplicate detection before ticket creation, and for adding new incidents after creation.</p>
+    <span class="tool-tag tag-teal">add_issue()</span>
+    <span class="tool-tag tag-teal">search_similar()</span>
+    <span class="tool-tag tag-teal">delete_issue()</span>
+    <span class="tool-tag tag-teal">collection_size()</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Deps: openai, chromadb · Env: EMBEDDING_DEPLOYMENT, CHROMA_PATH</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>github_tool.py</h3>
+    <p>Searches a configured GitHub repo for matching open issues using the GitHub REST search API. Supports optional label filtering. Returns top 5 matches with title, body snippet, labels, and URL.</p>
+    <span class="tool-tag tag-blue">search_github_issues()</span>
+    <span class="tool-tag tag-blue">label filter</span>
+    <span class="tool-tag tag-blue">REST v3</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Deps: requests · Env: GITHUB_TOKEN, GITHUB_REPO</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>servicenow_tool.py</h3>
+    <p>Creates, searches, and updates ServiceNow incidents via the Table API. Returns <code>incident_number</code> and a direct <code>incident_url</code> rendered as a button in the chat UI. Priority maps directly from P1–P4 to ServiceNow urgency/impact.</p>
+    <span class="tool-tag tag-coral">create_incident()</span>
+    <span class="tool-tag tag-coral">search_incidents()</span>
+    <span class="tool-tag tag-coral">update_incident()</span>
+    <span class="tool-tag tag-coral">get_incident_status()</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Deps: requests · Env: SERVICENOW_INSTANCE, _USERNAME, _PASSWORD</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>sheets_tool.py</h3>
+    <p>Google Sheets integration for pattern detection and incident logging. <code>search_past_incidents()</code> looks back N days for symptom-keyword matches and flags patterns when ≥3 similar reports exist. <code>log_incident()</code> appends one row per new ticket.</p>
+    <span class="tool-tag tag-green">search_past_incidents()</span>
+    <span class="tool-tag tag-green">log_incident()</span>
+    <span class="tool-tag tag-green">pattern detection</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Deps: google-auth, googleapiclient · Env: GOOGLE_SHEET_ID, GOOGLE_SHEETS_CREDENTIALS</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>excel_logger.py</h3>
+    <p>Appends one row per resolved incident to a local <code>.xlsx</code> file using pandas + openpyxl. Columns: Incident Number, User Message, Priority, Incident URL. File path is configurable via <code>INCIDENT_LOG_PATH</code>. Also used as a RAG source (Excel + GitHub) for future lookups.</p>
+    <span class="tool-tag tag-green">log_to_excel()</span>
+    <span class="tool-tag tag-green">openpyxl engine</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Deps: pandas, openpyxl · Env: INCIDENT_LOG_PATH · File: Past Incidents Log.xlsx</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>app.py — Flask API + dedup cache</h3>
+    <p>Flask server hosting the web chat UI and <code>/triage</code> + <code>/webhook</code> endpoints. Runs an in-memory MD5 dedup cache before forwarding to <code>main.py</code>. Returns cached result with <code>duplicate: true</code> for repeated reports. Swap <code>_triage_cache</code> dict for Redis for cross-restart persistence.</p>
+    <span class="tool-tag tag-gray">POST /triage</span>
+    <span class="tool-tag tag-gray">POST /webhook</span>
+    <span class="tool-tag tag-gray">_triage_cache</span>
+    <span class="tool-tag tag-gray">_normalise()</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">In-memory dedup · Port 5000 · debug=True</div>
+  </div>
+
+  <div class="tool-card">
+    <h3>workflow.py — LangGraph graph</h3>
+    <p>Defines the LangGraph <code>StateGraph</code> with 5 nodes: <b>detective → brain → rag_check → fixer → format_response</b>. Conditional edges handle: refined-search loop (brain→detective), duplicate short-circuit (rag→format), clarification branch (detective→format). Compiled once as <code>bug_triage_workflow</code>.</p>
+    <span class="tool-tag tag-purple">detective node</span>
+    <span class="tool-tag tag-purple">brain node</span>
+    <span class="tool-tag tag-purple">rag_check node</span>
+    <span class="tool-tag tag-purple">fixer node</span>
+    <span class="tool-tag tag-purple">format_response</span>
+    <div style="margin-top:8px;font-size:11px;color:var(--tt)">Deps: langgraph · Conditional edges via should_refine_search, needs_clarification, check_duplicate_result</div>
+  </div>
+
+</div>
+</div>
+</div><!-- /.wrap -->
+
+<script>
+// ─── TABS ───────────────────────────────────────────────────────────────────
+const TABS = ['arch','flow','tools'];
+function switchTab(t){
+  TABS.forEach(id=>{
+    document.getElementById('pane-'+id).classList.toggle('active',id===t);
+  });
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',TABS[i]===t));
+}
+
+// ─── NODE INFO ───────────────────────────────────────────────────────────────
+const NODE_DATA = {
+  user:{title:'User / Web UI',tag:'Entry',tagClass:'tag-gray',
+    desc:'The person submitting the bug via the web chat interface rendered by app.py. The message and reporter fields are POSTed to /triage.',
+    calls:'Calls: POST /triage → app.py → main.py → bug_triage_workflow'},
+
+  app:{title:'app.py — Flask API',tag:'Entry + Cache',tagClass:'tag-gray',
+    desc:'Flask server hosting the web UI and /triage + /webhook endpoints. Runs an in-memory MD5 dedup cache before forwarding to triage_bug() in main.py. Marks repeated reports as duplicate: true without re-running the workflow.',
+    calls:'Calls: triage_bug() in main.py · Cache: _triage_cache dict keyed by md5(_normalise(message))'},
+
+  main:{title:'main.py — Workflow entry point',tag:'Orchestration',tagClass:'tag-purple',
+    desc:'Initialises BugTriageState (15 fields) and invokes bug_triage_workflow (LangGraph StateGraph compiled in workflow.py). Parses final_response JSON from the completed state and attaches incident_number + incident_url for the UI.',
+    calls:'Calls: bug_triage_workflow.invoke(initial_state) · Returns: structured dict with type, message, priority, incident_url'},
+
+  detective:{title:'Detective agent — detective.py',tag:'Agent · Step 1',tagClass:'tag-blue',
+    desc:'First node in the LangGraph graph. Uses Azure OpenAI LLM to extract search keywords from the bug report, then calls search_github_issues(). Sets github_matches (list), github_search_count, needs_user_clarification, and selected_issue. If >1 match → clarification branch. If 0 matches → no selection.',
+    calls:'LLM: keyword extraction → github_tool.search_github_issues() · State: github_matches, selected_issue, needs_user_clarification'},
+
+  brain:{title:'Brain agent — brain.py',tag:'Agent · Step 2',tagClass:'tag-amber',
+    desc:'Second node. Calls sheets_tool.search_past_incidents() to check pattern (≥3 similar in 7 days). Then calls Azure OpenAI LLM with P1–P4 rules to classify priority. Auto-escalates to P1 if ≥2 unresolved past reports. Sets refined_search_needed=true to loop Detective if a better search query is identified.',
+    calls:'Calls: search_past_incidents() + AzureChatOpenAI · State: priority, priority_reasoning, pattern_detected, past_incidents, refined_search_needed'},
+
+  rag:{title:'RAG check node — rag_store.py',tag:'Duplicate check · Step 3',tagClass:'tag-teal',
+    desc:'Third node. Calls search_similar() in rag_store.py to find cosine-similar past incidents in ChromaDB. If cosine distance < 0.3 (configurable threshold), sets action_taken="duplicate_found" and short-circuits to format_response without creating a ticket. Note: duplicate short-circuit code is currently commented out in workflow.py — tuning recommended.',
+    calls:'Calls: rag_store.search_similar() → ChromaDB cosine query · Conditional: duplicate_found → format_response, else → fixer'},
+
+  fixer:{title:'Fixer agent — fixer.py',tag:'Agent · Step 4',tagClass:'tag-coral',
+    desc:'Fourth node. First searches ServiceNow for existing tickets on the same short description. If found, updates with a work note. If new: creates incident, logs to Google Sheets (log_incident), adds to ChromaDB RAG (add_issue), and appends to Excel log (log_to_excel). All writes are individually try/caught to avoid blocking the workflow.',
+    calls:'Calls: search_incidents(), create_incident(), update_incident(), log_incident(), add_issue(), log_to_excel() · State: action_taken, incident_number, incident_url'},
+
+  ghapi:{title:'github_tool.py — GitHub REST API',tag:'Tool',tagClass:'tag-blue',
+    desc:'Searches a configured GitHub repo for open issues matching extracted keywords. Supports optional label filtering (e.g. "bug"). Returns top 5 matches with number, title, body snippet, labels, URL, and created_at.',
+    calls:'Used by: Detective agent · Env: GITHUB_TOKEN, GITHUB_REPO · API: GET /search/issues'},
+
+  azure:{title:'Azure OpenAI',tag:'Tool',tagClass:'tag-amber',
+    desc:'Used by both Brain agent (AzureChatOpenAI via LangChain) and rag_store.py (embeddings). Brain uses GPT deployment for P1–P4 classification. RAG store uses text-embedding-ada-002 for vector embeddings stored in ChromaDB.',
+    calls:'Used by: brain.py (chat completions) + rag_store.py (embeddings) · Env: OPENAI_API_KEY, OPENAI_API_BASE, OPENAI_DEPLOYMENT, EMBEDDING_DEPLOYMENT'},
+
+  chroma:{title:'ChromaDB — Persistent vector store',tag:'Tool',tagClass:'tag-teal',
+    desc:'PersistentClient ChromaDB instance storing bug embeddings on disk (CHROMA_PATH env). Collection "bug_issues" uses cosine (HNSW) similarity. Data survives server restarts. Used for: (1) duplicate detection before ticket creation, (2) write-back after new ticket created.',
+    calls:'Used by: rag_store.py · Operations: upsert (add_issue), query (search_similar), delete · Path: CHROMA_PATH env var'},
+
+  snow:{title:'servicenow_tool.py — ServiceNow REST',tag:'Tool',tagClass:'tag-coral',
+    desc:'Creates, searches, and updates ServiceNow incidents via the Table API (/api/now/table/incident). Priority maps P1–P4 directly to ServiceNow urgency/impact (clamped to 1–3). Returns incident_number and incident_url rendered as a button in the chat UI.',
+    calls:'Functions: create_incident(), search_incidents(), update_incident(), get_incident_status() · Env: SERVICENOW_INSTANCE, _USERNAME, _PASSWORD'},
+
+  sheets:{title:'sheets_tool.py — Google Sheets',tag:'Tool',tagClass:'tag-green',
+    desc:'Reads/writes a Google Sheets spreadsheet (5 columns: Date, Reporter, Symptoms, Resolution, Ticket_ID). search_past_incidents() filters last N days by keyword match and flags pattern when ≥3 results. log_incident() appends one row per new ticket. Used by Brain (read) and Fixer (write).',
+    calls:'Used by: brain.py (search_past_incidents) + fixer.py (log_incident) · Env: GOOGLE_SHEET_ID, GOOGLE_SHEETS_CREDENTIALS'},
+
+  excel:{title:'excel_logger.py — Local Excel log',tag:'Tool',tagClass:'tag-green',
+    desc:'Appends one row per resolved incident to a local .xlsx file (Past Incidents Log.xlsx). Columns: Incident Number, User Message, Priority, Incident URL. Uses pandas + openpyxl. Also serves as a RAG data source alongside GitHub for future lookups.',
+    calls:'Function: log_to_excel() · Called by: fixer.py after incident creation · Env: INCIDENT_LOG_PATH'},
+
+  ragstore:{title:'RAG write-back — add_issue()',tag:'RAG store',tagClass:'tag-teal',
+    desc:'After a new ServiceNow incident is created, fixer.py calls rag_store.add_issue() to embed and upsert the bug description into ChromaDB. This ensures future similar bugs will be detected as duplicates via the RAG check node. Metadata stored: incident_url, incident_number.',
+    calls:'Function: add_issue(issue_id, text, metadata) · Called by: fixer.py · Writes to: ChromaDB bug_issues collection'},
+
+  response:{title:'format_response() — Final output builder',tag:'Output',tagClass:'tag-gray',
+    desc:'Last node in the graph (before END). Assembles the final_response JSON from state fields. Handles all response types: clarification (github options list), duplicate (existing ticket), created (new ticket with incident_url), updated (existing ticket updated), error, and logged (fallback). Returned to UI for rendering.',
+    calls:'Reads: full BugTriageState · Writes: final_response JSON string · Types: clarification | duplicate | created | updated | error | logged'},
+};
+
+function nodeClick(id){
+  const d = NODE_DATA[id];
+  if(!d) return;
+  document.getElementById('ni-title').textContent = d.title;
+  const tag = document.getElementById('ni-tag');
+  tag.textContent = d.tag;
+  tag.className = 'tool-tag '+d.tagClass;
+  document.getElementById('ni-desc').textContent = d.desc;
+  document.getElementById('ni-calls').textContent = d.calls;
+  document.getElementById('node-info').style.display = 'block';
+  document.querySelectorAll('.arch-node').forEach(n=>n.style.opacity='0.35');
+  document.getElementById('n-'+id).style.opacity='1';
+}
+
+document.getElementById('arch-svg').addEventListener('click',function(e){
+  if(e.target===this || e.target.tagName==='line' || e.target.tagName==='path' || e.target.tagName==='text'){
+    if(!e.target.closest || !e.target.closest('.arch-node')){
+      document.querySelectorAll('.arch-node').forEach(n=>n.style.opacity='1');
+      document.getElementById('node-info').style.display='none';
+    }
+  }
+});
+
+// ─── LIVE FLOW SIMULATION ────────────────────────────────────────────────────
+// Matches the ACTUAL workflow.py node order:
+// detective → brain → rag_check → fixer → format_response
+const STEPS = [
+  {id:'dedup',     label:'Dedup cache',  color:'#B4B2A9', detail:'app.py · MD5 hash check'},
+  {id:'init',      label:'Init state',   color:'#AFA9EC', detail:'main.py · BugTriageState 15 fields'},
+  {id:'detective', label:'Detective',    color:'#85B7EB', detail:'detective.py · LLM keywords + GitHub search'},
+  {id:'brain',     label:'Brain',        color:'#EF9F27', detail:'brain.py · Sheets pattern + LLM priority'},
+  {id:'rag',       label:'RAG check',    color:'#5DCAA5', detail:'rag_store.py · ChromaDB cosine similarity'},
+  {id:'fixer',     label:'Fixer',        color:'#F0997B', detail:'fixer.py · ServiceNow + Sheets + Excel + RAG'},
+  {id:'response',  label:'Response',     color:'#B4B2A9', detail:'format_response() · JSON → UI'},
+];
+
+// Simulation event timeline (matches actual agent behaviour)
+const SIM_EVENTS = [
+  {step:0, icon:'🔐', msg:'app.py: computing <b>MD5 hash</b> of normalised message'},
+  {step:0, icon:'✅', msg:'Cache miss — new report, forwarding to <b>triage_bug()</b>'},
+  {step:1, icon:'🚀', msg:'main.py: initialising <b>BugTriageState</b> with 15 fields'},
+  {step:1, icon:'⚙️', msg:'Invoking <b>bug_triage_workflow</b> (LangGraph StateGraph)'},
+  {step:2, icon:'🕵️', msg:'Detective: LLM extracting <b>search keywords</b> from bug report'},
+  {step:2, icon:'🐙', msg:'github_tool: searching <b>GITHUB_REPO</b> for matching open issues'},
+  {step:2, icon:'🔗', msg:'Detective: found 2 issues → <b>selected_issue</b> set, no clarification needed'},
+  {step:3, icon:'📊', msg:'Brain: calling <b>search_past_incidents()</b> on Google Sheets'},
+  {step:3, icon:'🧩', msg:'Sheets: found 2 matching reports in last 7 days → <b>pattern_detected: true</b>'},
+  {step:3, icon:'🤖', msg:'Brain: LLM classifying priority with P1–P4 rules via <b>Azure OpenAI</b>'},
+  {step:3, icon:'🎯', msg:'Brain: LLM returned <b>priority: 2 (P2 High)</b> — major feature broken'},
+  {step:4, icon:'🧠', msg:'RAG check: embedding bug via <b>text-embedding-ada-002</b>'},
+  {step:4, icon:'📦', msg:'ChromaDB: cosine similarity query — top-3 past incidents'},
+  {step:4, icon:'🟢', msg:'RAG: distance > 0.3 — <b>not a duplicate</b>, proceeding to Fixer'},
+  {step:5, icon:'🔍', msg:'Fixer: searching ServiceNow for existing ticket on same description'},
+  {step:5, icon:'🆕', msg:'No existing ticket — calling <b>create_incident()</b> P2'},
+  {step:5, icon:'✅', msg:'ServiceNow: <b>INC0012345</b> created — incident_url stored in state'},
+  {step:5, icon:'📋', msg:'Fixer: logging to <b>Google Sheets</b> via log_incident()'},
+  {step:5, icon:'🧩', msg:'Fixer: <b>add_issue()</b> → embedding + upsert into ChromaDB'},
+  {step:5, icon:'📊', msg:'Fixer: <b>log_to_excel()</b> → appending row to Past Incidents Log.xlsx'},
+  {step:6, icon:'📤', msg:'format_response(): building JSON with type=<b>created</b>'},
+  {step:6, icon:'🎉', msg:'Response returned — <b>ticket card rendered</b> in web UI'},
+];
+
+// BugTriageState snapshots per step
+const STATE_FRAMES = [
+  {current_step:'start',          priority:3, incident_number:null,          pattern_detected:false, github_matches:0, action_taken:'none', refined_search_needed:false},
+  {current_step:'start',          priority:3, incident_number:null,          pattern_detected:false, github_matches:0, action_taken:'none', refined_search_needed:false},
+  {current_step:'detective',      priority:3, incident_number:null,          pattern_detected:false, github_matches:0, action_taken:'none', refined_search_needed:false},
+  {current_step:'detective',      priority:3, incident_number:null,          pattern_detected:false, github_matches:0, action_taken:'none', refined_search_needed:false},
+  {current_step:'detective',      priority:3, incident_number:null,          pattern_detected:false, github_matches:0, action_taken:'none', refined_search_needed:false},
+  {current_step:'detective',      priority:3, incident_number:null,          pattern_detected:false, github_matches:0, action_taken:'none', refined_search_needed:false},
+  {current_step:'detective_complete', priority:3, incident_number:null,      pattern_detected:false, github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'brain',          priority:3, incident_number:null,          pattern_detected:false, github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'brain',          priority:3, incident_number:null,          pattern_detected:true,  github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'brain',          priority:3, incident_number:null,          pattern_detected:true,  github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'brain_complete', priority:2, incident_number:null,          pattern_detected:true,  github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'rag_check',      priority:2, incident_number:null,          pattern_detected:true,  github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'rag_check',      priority:2, incident_number:null,          pattern_detected:true,  github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'rag_check',      priority:2, incident_number:null,          pattern_detected:true,  github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'fixer',          priority:2, incident_number:null,          pattern_detected:true,  github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'fixer',          priority:2, incident_number:null,          pattern_detected:true,  github_matches:2, action_taken:'none', refined_search_needed:false},
+  {current_step:'fixer',          priority:2, incident_number:'INC0012345', pattern_detected:true,  github_matches:2, action_taken:'created', refined_search_needed:false},
+  {current_step:'fixer',          priority:2, incident_number:'INC0012345', pattern_detected:true,  github_matches:2, action_taken:'created', refined_search_needed:false},
+  {current_step:'fixer',          priority:2, incident_number:'INC0012345', pattern_detected:true,  github_matches:2, action_taken:'created', refined_search_needed:false},
+  {current_step:'fixer_complete', priority:2, incident_number:'INC0012345', pattern_detected:true,  github_matches:2, action_taken:'created', refined_search_needed:false},
+  {current_step:'format_response',priority:2, incident_number:'INC0012345', pattern_detected:true,  github_matches:2, action_taken:'created', refined_search_needed:false},
+  {current_step:'done',           priority:2, incident_number:'INC0012345', pattern_detected:true,  github_matches:2, action_taken:'created', refined_search_needed:false},
+];
+
+let simTimer=null;
+
+function buildStepTrack(){
+  const t = document.getElementById('step-track');
+  t.innerHTML='';
+  STEPS.forEach((s,i)=>{
+    const dot = document.createElement('div');
+    dot.className='step-dot';
+    dot.id='sdot-'+i;
+    dot.textContent=i+1;
+    dot.title=s.label+': '+s.detail;
+    t.appendChild(dot);
+    if(i<STEPS.length-1){
+      const line=document.createElement('div');
+      line.className='step-line';
+      line.id='sline-'+i;
+      t.appendChild(line);
+    }
+  });
+}
+
+function setStep(idx){
+  STEPS.forEach((_,i)=>{
+    const dot=document.getElementById('sdot-'+i);
+    if(!dot) return;
+    dot.className='step-dot'+(i<idx?' done':i===idx?' active':'');
+    if(i<STEPS.length-1){
+      const ln=document.getElementById('sline-'+i);
+      if(ln) ln.className='step-line'+(i<idx?' done':'');
+    }
+  });
+  if(idx>=0&&idx<STEPS.length){
+    const s=STEPS[idx];
+    document.getElementById('aa-dot').style.background=s.color;
+    document.getElementById('aa-name').textContent=s.label+' agent';
+    document.getElementById('aa-detail').textContent=s.detail;
+  }
+}
+
+function addLog(icon,msg,time){
+  const log=document.getElementById('flow-log');
+  if(log.querySelector('[data-placeholder]')) log.innerHTML='';
+  const entry=document.createElement('div');
+  entry.className='log-entry';
+  entry.innerHTML=`<span class="log-time">${time}</span><span class="log-icon">${icon}</span><span class="log-msg">${msg}</span>`;
+  log.appendChild(entry);
+  log.scrollTop=log.scrollHeight;
+}
+
+function renderState(frame){
+  if(!frame) return;
+  const panel=document.getElementById('state-panel');
+  const P={1:'P1 Critical',2:'P2 High',3:'P3 Medium',4:'P4 Low'};
+  panel.innerHTML=`
+    <div class="state-row"><span class="state-key">current_step</span><span class="state-val v-str">${frame.current_step}</span></div>
+    <div class="state-row"><span class="state-key">priority</span><span class="state-val v-int">${P[frame.priority]||frame.priority}</span></div>
+    <div class="state-row"><span class="state-key">incident_number</span><span class="state-val ${frame.incident_number?'v-str':'v-null'}">${frame.incident_number||'null'}</span></div>
+    <div class="state-row"><span class="state-key">pattern_detected</span><span class="state-val ${frame.pattern_detected?'v-bool-t':'v-bool-f'}">${frame.pattern_detected}</span></div>
+    <div class="state-row"><span class="state-key">github_matches</span><span class="state-val v-int">${frame.github_matches}</span></div>
+    <div class="state-row"><span class="state-key">action_taken</span><span class="state-val v-str">${frame.action_taken}</span></div>
+    <div class="state-row"><span class="state-key">refined_search_needed</span><span class="state-val ${frame.refined_search_needed?'v-bool-t':'v-bool-f'}">${frame.refined_search_needed}</span></div>
+  `;
+}
+
+function runSim(){
+  if(simTimer) clearTimeout(simTimer);
+  clearSim(false);
+  buildStepTrack();
+  document.getElementById('flow-log').innerHTML='';
+
+  let i=0;
+  const startTime=Date.now();
+
+  function play(){
+    if(i>=SIM_EVENTS.length) {
+      setStep(STEPS.length-1);
+      return;
+    }
+    const ev=SIM_EVENTS[i];
+    const t=((Date.now()-startTime)/1000).toFixed(1)+'s';
+    addLog(ev.icon, ev.msg, t);
+    setStep(ev.step);
+    const frame=STATE_FRAMES[Math.min(i, STATE_FRAMES.length-1)];
+    renderState(frame);
+    i++;
+    simTimer=setTimeout(play, 480);
+  }
+  play();
+}
+
+function clearSim(resetTrack=true){
+  if(simTimer){clearTimeout(simTimer);simTimer=null;}
+  const log=document.getElementById('flow-log');
+  log.innerHTML='<div data-placeholder="1" style="color:var(--tt);font-size:11px;padding:6px 0">Waiting for simulation…</div>';
+  document.getElementById('state-panel').innerHTML='<div style="color:var(--tt);font-size:11px;padding:6px 0">No state yet</div>';
+  document.getElementById('aa-dot').style.background='var(--b2)';
+  document.getElementById('aa-name').textContent='Idle';
+  document.getElementById('aa-detail').textContent='';
+  if(resetTrack) buildStepTrack();
+}
+
+buildStepTrack();
+</script>
+</body>
+</html>
