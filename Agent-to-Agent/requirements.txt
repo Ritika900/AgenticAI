@@ -1,0 +1,8 @@
+a2a-sdk
+fastmcp
+openai
+starlette
+uvicorn
+httpx
+mcp
+python-dotenv
